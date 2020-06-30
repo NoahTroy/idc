@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-import subprocess , os
+import subprocess , os , threading
 
 from colorama import Fore , Style
 
@@ -51,7 +51,7 @@ def startupSequence():
 							targetDiskFullPath = os.path.join(targetDiskPath , targetDisk)
 
 							if (os.path.exists(targetDiskFullPath)):
-								print(Fore.GREEN + 'Target Disk set to ' + targetDiskFullPath + Style.RESET_ALL , end = '\n\n')
+								print(Fore.GREEN + 'Target Disk set to "' + targetDiskFullPath + '"' + Style.RESET_ALL , end = '\n\n')
 							else:
 								print(Fore.RED + 'Error!\nThe target disk (' + targetDiskFullPath + ') could not be found!\nYou probably forgot to attach the disk,\nor entered an incorrect disk name.\n\nIf your device is not located at /dev/,\nyou will need to modify the "targetDiskPath" variable\nfound in the "MAIN VARIABLES" section of this program.\nThis program should be located in "/usr/sbin/" on your system.\n\nExiting...' + Style.RESET_ALL , end = '\n\n')
 								exit()
@@ -66,6 +66,40 @@ def startupSequence():
 		exit()
 
 
+def processEvents():
+	def handleEvent(cpu, data, size):
+		event = bpfInst['events'].event(data)
+
+		if ((event.readOrWrite == 1) and (event.diskName.decode('utf-8' , 'replace') == targetDisk)):
+			sendThread = threading.Thread(target = masterSocket , args = (event.sector , event.length))
+			sendThread.start()
+
+
+	bpfText = '#include <uapi/linux/ptrace.h>\n#include <linux/blkdev.h>\n\nstruct mainData {char diskName[DISK_NAME_LEN];u64 readOrWrite;u64 sector;u64 length;};BPF_HASH(start , struct request *);BPF_PERF_OUTPUT(events);int traceCompletedRequests(struct pt_regs *ctx , struct request *req){struct mainData data = {};struct gendisk *rq_disk = req->rq_disk;bpf_probe_read(&data.diskName , sizeof(data.diskName) , rq_disk->disk_name);data.sector = req->__sector;data.length = req->__data_len;\n#ifdef REQ_WRITE\n    data.readOrWrite = !!(req->cmd_flags & REQ_WRITE);\n#elif defined(REQ_OP_SHIFT)\n    data.readOrWrite = !!((req->cmd_flags >> REQ_OP_SHIFT) == REQ_OP_WRITE);\n#else\n    data.readOrWrite = !!((req->cmd_flags & REQ_OP_MASK) == REQ_OP_WRITE);\n#endif\nevents.perf_submit(ctx , &data , sizeof(data));start.delete(&req);return 0;}'
+
+	bpfInst = BPF(text = bpfText)
+	bpfInst.attach_kprobe(event = 'blk_account_io_completion' , fn_name = 'traceCompletedRequests')
+	bpfInst['events'].open_perf_buffer(handleEvent , page_cnt = 64)
+
+	while (True):
+		bpfInst.perf_buffer_poll()
+
+
+def masterSocket(sector , dataAmount):
+	pass
+
+
+def cloneSocket():
+	pass
+
+
 ##################### MAIN EXECUTION #####################
 startupSequence()
+
+if (targetDiskMode == 'master'):
+	processEvents()
+elif (targetDiskMode == 'clone'):
+	pass
+else:
+	print(Fore.RED + 'A valid Target Disk Mode could not be established.\nExiting...' + Style.RESET_ALL)
 ################## END OF MAIN EXECUTION #################
