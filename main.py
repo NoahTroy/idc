@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-import subprocess , os , threading
+import os , socket , queue , threading , time , uuid
 
 from colorama import Fore , Style
 
@@ -19,6 +19,11 @@ targetDisk = 'sdb'
 
 targetDiskPath = '/dev'
 targetDiskFullPath = '/dev/sdb'
+
+socketLocation = '/tmp'
+
+writeProcessQueue = queue.Queue()
+sendQueue = queue.Queue()
 ################## END OF MAIN VARIABLES #################
 
 
@@ -71,8 +76,7 @@ def processEvents():
 		event = bpfInst['events'].event(data)
 
 		if ((event.readOrWrite == 1) and (event.diskName.decode('utf-8' , 'replace') == targetDisk)):
-			sendThread = threading.Thread(target = masterSocket , args = (event.sector , event.length))
-			sendThread.start()
+			writeProcessQueue.put([event.sector , event.length])
 
 
 	bpfText = '#include <uapi/linux/ptrace.h>\n#include <linux/blkdev.h>\n\nstruct mainData {char diskName[DISK_NAME_LEN];u64 readOrWrite;u64 sector;u64 length;};BPF_HASH(start , struct request *);BPF_PERF_OUTPUT(events);int traceCompletedRequests(struct pt_regs *ctx , struct request *req){struct mainData data = {};struct gendisk *rq_disk = req->rq_disk;bpf_probe_read(&data.diskName , sizeof(data.diskName) , rq_disk->disk_name);data.sector = req->__sector;data.length = req->__data_len;\n#ifdef REQ_WRITE\n    data.readOrWrite = !!(req->cmd_flags & REQ_WRITE);\n#elif defined(REQ_OP_SHIFT)\n    data.readOrWrite = !!((req->cmd_flags >> REQ_OP_SHIFT) == REQ_OP_WRITE);\n#else\n    data.readOrWrite = !!((req->cmd_flags & REQ_OP_MASK) == REQ_OP_WRITE);\n#endif\nevents.perf_submit(ctx , &data , sizeof(data));start.delete(&req);return 0;}'
@@ -85,8 +89,18 @@ def processEvents():
 		bpfInst.perf_buffer_poll()
 
 
-def masterSocket(sector , dataAmount):
+def processWriteData():
+	#uniqueID = str(uuid.uuid4()).encode('utf-8')
 	pass
+
+
+def masterSocket():
+	with socket.socket(socket.AF_UNIX , socket.SOCK_STREAM) as s:
+		s.connect(os.path.join(socketLocation , 'idcMasterSocket.sock'))
+
+	while (True):
+		#s.sendall()
+		pass
 
 
 def cloneSocket():
@@ -97,6 +111,12 @@ def cloneSocket():
 startupSequence()
 
 if (targetDiskMode == 'master'):
+	socketThread = threading.Thread(target = masterSocket , args = ())
+	socketThread.start()
+
+	processThread = threading.Thread(target = processWriteData , args = ())
+	processThread.start()
+
 	processEvents()
 elif (targetDiskMode == 'clone'):
 	pass
