@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-import os , socket , queue , threading , time , uuid , subprocess , pickle
+import os , socket , queue , threading , time , uuid , subprocess , pickle , pathlib
 
 from colorama import Fore , Style
 
@@ -20,6 +20,9 @@ fetchDelay = 300
 
 targetDiskPath = '/dev'
 targetDiskFullPath = '/dev/sdb'
+
+pendingWritesFilePath = '/root/.idc'
+pendingWritesFileFullPath = '/root/.idc/cachedData.dat'
 
 socketLocation = '/tmp'
 
@@ -42,6 +45,10 @@ def startupSequence():
 
 	# Load the config file, or create it with default values if it doesn't exist:
 	if (os.path.isfile(configFileFullPath)):
+		if (not(os.path.exists(pendingWritesFilePath))):
+			pathlib.Path(pendingWritesFilePath).mkdir(parents = True , exist_ok = True)
+			print(Fore.CYAN + 'The default cache directory was not found,\nso a new one was created, here: ' + pendingWritesFilePath + Style.RESET_ALL , end = '\n\n')
+
 		with open(configFileFullPath , 'r') as idcConfFile:
 			for line in idcConfFile.readlines():
 				if (not((len(line) < 2) or (line[0] == '#'))):
@@ -149,6 +156,8 @@ def dataFetcher(returnedData = None):
 				with open(pendingWritesFileFullPath , 'wb') as writesFile:
 					pickle.dump(pendingWritesFileContents , writesFile)
 			else:
+				print(Fore.MAGENTA + 'PLEASE READ THE FOLLOWING WARNING:\n' + Fore.YELLOW + 'WARNING\nMORE THAN 1,000 WRITE OPERATIONS HAVE BEEN NOT BEEN\nRECEIVED BY THE CLONE SERVER. THESE OPERATIONS WILL NOW\nBE CACHED IN A PHYSICAL FILE WRITTEN TO THIS SERVER\'S\nLOCAL STORAGE. WE RECOMMEND HALTING FURTHER WRITE OPERATIONS\nTO THE TARGET DISK UNTIL A CONNECTION IS ESTABLISHED WITH\nTHE CLONE SERVER, AND ALL WRITE OPERATIONS HAVE BEEN SENT\nAND CLEARED FROM THE LOCAL CACHE.\nUNTIL THIS CAN HAPPEN, YOU MAY EXPERIENCE SOME\nSIGNIFICANT PERFORMANCE DETRIMENTS.' + Style.RESET_ALL , end = '\n\n')
+
 				pendingWritesFile = True
 
 				pendingWritesFileContents = []
@@ -177,6 +186,7 @@ def masterSocket():
 		with socket.socket(socket.AF_UNIX , socket.SOCK_STREAM) as s:
 			try:
 				s.connect(os.path.join(socketLocation , 'idcMasterSocket.sock'))
+				print(Fore.GREEN + 'A connection with the clone server has\nbeen successfully established.' + Style.RESET_ALL , end = '\n\n')
 			except:
 				print(Fore.YELLOW + 'Warning!\nA connection could not be established with the clone server.\nAny changes made to the target disk will be cached,\nand sent once a connection is established.\nTrying again in one minute...' + Style.RESET_ALL , end = '\n\n')
 				time.sleep(60)
@@ -194,7 +204,8 @@ def masterSocket():
 
 
 def cloneSocket():
-	pass
+	while (True):
+		pass
 
 
 ##################### MAIN EXECUTION #####################
