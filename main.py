@@ -17,6 +17,9 @@ configFileFullPath = '/etc/idc.conf'
 targetDiskMode = 'master'
 targetDisk = 'sdb'
 fetchDelay = 300
+remoteServerIP = '10.0.0.2'
+remoteServerPort = 22
+identityFile = '/root/.idc/privKey.pem'
 
 targetDiskPath = '/dev'
 targetDiskFullPath = '/dev/sdb'
@@ -77,6 +80,7 @@ def startupSequence():
 
 							try:
 								targetDiskLogicalSectorSize = int(subprocess.Popen(['lsblk' , targetDiskFullPath , '--output' , 'LOG-SEC'] , stdout = subprocess.PIPE).stdout.read().decode('utf-8').split()[1])
+								print(Fore.GREEN + 'Target Disk logical sector size detected as ' + str(targetDiskLogicalSectorSize) + ' bytes.' + Style.RESET_ALL , end = '\n\n')
 							except:
 								print(Fore.RED + 'Error!\nThe logical sector size of the target disk could\nnot be determined. If "lsblk" is not installed on your\nsystem, that could be the cause of this error.\nExiting...' + Style.RESET_ALL , end = '\n\n')
 								exit()
@@ -90,9 +94,43 @@ def startupSequence():
 							if (fetchDelay < 0):
 								fetchDelay = 300
 								print(Fore.YELLOW + 'Warning!\nA fetch delay value of less than zero was used.\nThis value is invalid. Please choose a value greater than zero.\nThe default value of 300 will be used for now...' + Style.RESET_ALL , end = '\n\n')
+							else:
+								print(Fore.GREEN + 'Fetch Delay set to: ' + str(fetchDelay) + Style.RESET_ALL , end = '\n\n')
 						except:
 							fetchDelay = 300
 							print(Fore.YELLOW + 'Warning!\nAn invalid fetch delay value was set in the configuration file.\nPlease choose an integer value greater than zero.\nThe default value of 300 will be used for now...' + Style.RESET_ALL , end = '\n\n')
+					if ('Remote Server IP: ' in line):
+						try:
+							location = (lineParts.index('IP:') + 1)
+							remoteServerIP = lineParts[location]
+							print(Fore.GREEN + 'Remote Server IP set to: ' + remoteServerIP + Style.RESET_ALL , end = '\n\n')
+						except:
+							print(Fore.YELLOW + 'Warning!\nThe remote server IP address could not be detected.\nThe default value of "10.0.0.2" will be used for now...' + Style.RESET_ALL , end = '\n\n')
+							remoteServerIP = '10.0.0.2'
+					if ('Remote Server Port: ' in line):
+						try:
+							location = (lineParts.index('Port:') + 1)
+							remoteServerPort = int(lineParts[location])
+							if ((remoteServerPort < 65536) and (remoteServerPort > 0)):
+								print(Fore.GREEN + 'Remote Server Port set to: ' + Style.RESET_ALL , end = '\n\n')
+							else:
+								print(Fore.YELLOW + 'Warning!\nAn invalid remote server port was provided.\nPlease make sure the port number is between 0 and 65536.\nThe default value of 22 will be used for now...' + Style.RESET_ALL , end = '\n\n')
+								remoteServerPort = 22
+						except:
+							print(Fore.YELLOW + 'Warning!\nAn invalid (non-integer) remote server port was provided.\nThe default value of 22 will be used for now...' + Style.RESET_ALL , end = '\n\n')
+							remoteServerPort = 22
+					if ('Identity File: ' in line):
+						try:
+							location = (lineParts.index('File:') + 1)
+							identityFile = lineParts[location]
+							if (os.path.isfile(identityFile)):
+								print(Fore.GREEN + 'The identity file was found. Please make sure that it has\nthe proper permissions set, and that the fingerprint\nof the remote host has already been saved in the "known_hosts" file.\nThis program will assume that the previous has already\nbeen done, and will continue running...' + Style.RESET_ALL , end = '\n\n')
+							else:
+								print(Fore.RED + 'Error!\nAn identity file was not found in the location provided.\nExiting...' + Style.RESET_ALL , end = '\n\n')
+								exit()
+						except:
+							print(Fore.RED + 'Error!\nA valid identity file entry could not be found.\nExiting...' + Style.RESET_ALL , end = '\n\n')
+							exit()
 	else:
 		print(Fore.YELLOW + 'Warning!\nNo configuration file was found at ' + configFileFullPath + '\nA configuration file will be automatically created for you\nand populated with default values.' + Style.RESET_ALL , end = '\n\n')
 		with open(configFileFullPath , 'w') as idcConfFile:
@@ -209,12 +247,22 @@ def masterSocket():
 
 
 def cloneSocket():
+	forwardSocket = None
 	while (True):
 		try:
+			try:
+				if (forwardSocket):
+					forwardSocket.terminate()
+			except:
+				try:
+					forwardSocket.kill()
+				except:
+					print(Fore.RED + 'Unable to stop socket forwarding.' + Style.RESET_ALL , end = '\n\n')
 			os.remove(os.path.join(socketLocation , 'idcCloneSocket.sock'))
 			print(Fore.CYAN + 'Successfully removed old unix domain socket.' + Style.RESET_ALL , end = '\n\n')
 		except:
 			print(Fore.CYAN + 'No old unix domain socket to remove.' + Style.RESET_ALL , end = '\n\n')
+
 		with socket.socket(socket.AF_UNIX , socket.SOCK_STREAM) as s:
 			try:
 				s.bind(os.path.join(socketLocation , 'idcCloneSocket.sock'))
@@ -224,6 +272,9 @@ def cloneSocket():
 				print(Fore.YELLOW + 'Warning!\nUnable to bind to the local unix domain socket\nforwarded between this (clone) server and the master server.\nTrying again in one minute...' + Style.RESET_ALL , end = '\n\n')
 				time.sleep(60)
 				continue
+
+			# ADD ERROR CHECKING
+			forwardSocket = subprocess.Popen(['ssh' , '-NnT' , '-i' , identityFile , '-p' , str(remoteServerPort) , '-R' , (os.path.join(socketLocation , 'idcMasterSocket.sock') + ':' + os.path.join(socketLocation , 'idcCloneSocket.sock')) , ('root@' + remoteServerIP)] , stdout = subprocess.PIPE)
 
 
 ##################### MAIN EXECUTION #####################
