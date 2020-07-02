@@ -96,7 +96,7 @@ def startupSequence():
 	else:
 		print(Fore.YELLOW + 'Warning!\nNo configuration file was found at ' + configFileFullPath + '\nA configuration file will be automatically created for you\nand populated with default values.' + Style.RESET_ALL , end = '\n\n')
 		with open(configFileFullPath , 'w') as idcConfFile:
-			idcConfFile.write('###################### idc Configuration File ######################\n\n# The target disk mode indicates whether the target disk is to be\n# read from or written to. This is a very important setting, and\n# can lead to data loss if improperly set. The two options for\n# this setting are "master" and "clone":\n#\n# "master" : If set, the target disk will have all write operations\n#            to it logged, and will be marked the disk to be cloned.\n#            This disk will only be read from by idc, and idc will\n#            never modify its contents. This is the "local" disk.\n#\n# "clone" :  If set, the target disk will be marked as the clone of\n#            a separate, "master" disk. Any changes made to the master\n#            disk will be written to this disk. Any changes made\n#            locally to this disk will be ignored, and overwritten.\n#            This is the "remote", backup disk.\n\nTarget Disk Mode: master\n\n\n# The target disk is the disk with which idc is to interact. Depending\n# on the target disk mode, this disk will either be the disk being\n# tracked, or the disk being written-to. Please make sure that this\n# is a block-level device, and do not include any leading directory\n# information. For example, "/dev/sdb" should be written as "sdb".\n\nTarget Disk: sdb\n\n\n# The fetch delay is the amount of time (in seconds) that the\n# program will wait after the last detected write operation\n# to the target disk, before reading the new data on the disk\n# and forwarding it to the clone. This setting is only\n# applicable if the target disk mode is set to "master".\n\nFetch Delay: 300\n')
+			idcConfFile.write('###################### idc Configuration File ######################\n\n# The target disk mode indicates whether the target disk is to be\n# read from or written to. This is a very important setting, and\n# can lead to data loss if improperly set. The two options for\n# this setting are "master" and "clone":\n#\n# "master" : If set, the target disk will have all write operations\n#            to it logged, and will be marked the disk to be cloned.\n#            This disk will only be read from by idc, and idc will\n#            never modify its contents. This is the "local" disk.\n#\n# "clone" :  If set, the target disk will be marked as the clone of\n#            a separate, "master" disk. Any changes made to the master\n#            disk will be written to this disk. Any changes made\n#            locally to this disk will be ignored, and overwritten.\n#            This is the "remote", backup disk.\n\nTarget Disk Mode: master\n\n\n# The target disk is the disk with which idc is to interact. Depending\n# on the target disk mode, this disk will either be the disk being\n# tracked, or the disk being written-to. Please make sure that this\n# is a block-level device, and do not include any leading directory\n# information. For example, "/dev/sdb" should be written as "sdb".\n\nTarget Disk: sdb\n\n\n# The fetch delay is the amount of time (in seconds) that the\n# program will wait after the last detected write operation\n# to the target disk, before reading the new data on the disk\n# and forwarding it to the clone. This setting is only\n# applicable if the target disk mode is set to "master".\n\nFetch Delay: 300\n\n\n# The remote server IP is the IP address of the remote server with\n# which data is to be transmitted. If this server is the master\n# server, then the remote server IP address would be the IP\n# address of the clone server, and vice versa.\n\nRemote Server IP: 10.0.0.2\n\n\n# The remote server port is the network port of the remote server\n# on which the sshd daemon is listening for incoming connections.\n# The default value is 22.\n\nRemote Server Port: 22\n\n\n# The identity file is the private key required in order to connect\n# with the remote server via SSH. Please provide the full path to\n# this file.\n\nIdentity File: /root/.idc/privKey.pem\n')
 		print(Fore.YELLOW + 'A default configuration file has been created.\nExiting...' + Style.RESET_ALL , end = '\n\n')
 		exit()
 
@@ -183,6 +183,11 @@ def dataFetcher(returnedData = None):
 
 def masterSocket():
 	while (True):
+		try:
+			os.remove(os.path.join(socketLocation , 'idcMasterSocket.sock'))
+			print(Fore.CYAN + 'Successfully removed old unix domain socket.' + Style.RESET_ALL , end = '\n\n')
+		except:
+			print(Fore.CYAN + 'No old unix domain socket to remove.' + Style.RESET_ALL , end = '\n\n')
 		with socket.socket(socket.AF_UNIX , socket.SOCK_STREAM) as s:
 			try:
 				s.connect(os.path.join(socketLocation , 'idcMasterSocket.sock'))
@@ -205,7 +210,20 @@ def masterSocket():
 
 def cloneSocket():
 	while (True):
-		pass
+		try:
+			os.remove(os.path.join(socketLocation , 'idcCloneSocket.sock'))
+			print(Fore.CYAN + 'Successfully removed old unix domain socket.' + Style.RESET_ALL , end = '\n\n')
+		except:
+			print(Fore.CYAN + 'No old unix domain socket to remove.' + Style.RESET_ALL , end = '\n\n')
+		with socket.socket(socket.AF_UNIX , socket.SOCK_STREAM) as s:
+			try:
+				s.bind(os.path.join(socketLocation , 'idcCloneSocket.sock'))
+				s.listen()
+				print(Fore.GREEN + 'Successfully connected to the clone server socket.' + Style.RESET_ALL , end = '\n\n')
+			except:
+				print(Fore.YELLOW + 'Warning!\nUnable to bind to the local unix domain socket\nforwarded between this (clone) server and the master server.\nTrying again in one minute...' + Style.RESET_ALL , end = '\n\n')
+				time.sleep(60)
+				continue
 
 
 ##################### MAIN EXECUTION #####################
@@ -220,7 +238,8 @@ if (targetDiskMode == 'master'):
 
 	processEvents()
 elif (targetDiskMode == 'clone'):
-	pass
+	socketThread = threading.Thread(target = cloneSocket , args = ())
+	socketThread.start()
 else:
 	print(Fore.RED + 'A valid Target Disk Mode could not be established.\nExiting...' + Style.RESET_ALL)
 ################## END OF MAIN EXECUTION #################
