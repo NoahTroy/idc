@@ -112,7 +112,7 @@ def startupSequence():
 							location = (lineParts.index('Port:') + 1)
 							remoteServerPort = int(lineParts[location])
 							if ((remoteServerPort < 65536) and (remoteServerPort > 0)):
-								print(Fore.GREEN + 'Remote Server Port set to: ' + Style.RESET_ALL , end = '\n\n')
+								print(Fore.GREEN + 'Remote Server Port set to: ' + str(remoteServerPort) + Style.RESET_ALL , end = '\n\n')
 							else:
 								print(Fore.YELLOW + 'Warning!\nAn invalid remote server port was provided.\nPlease make sure the port number is between 0 and 65536.\nThe default value of 22 will be used for now...' + Style.RESET_ALL , end = '\n\n')
 								remoteServerPort = 22
@@ -273,8 +273,13 @@ def cloneSocket():
 				time.sleep(60)
 				continue
 
-			# ADD ERROR CHECKING
-			forwardSocket = subprocess.Popen(['ssh' , '-NnT' , '-i' , identityFile , '-p' , str(remoteServerPort) , '-R' , (os.path.join(socketLocation , 'idcMasterSocket.sock') + ':' + os.path.join(socketLocation , 'idcCloneSocket.sock')) , ('root@' + remoteServerIP)] , stdout = subprocess.PIPE)
+			forwardSocket = subprocess.Popen(['ssh' , '-NnT' , '-i' , identityFile , '-p' , str(remoteServerPort) , '-R' , (os.path.join(socketLocation , 'idcMasterSocket.sock') + ':' + os.path.join(socketLocation , 'idcCloneSocket.sock')) , ('root@' + remoteServerIP)] , stderr = subprocess.PIPE)
+
+			# Call a function, here, that will receive data and carry-out the appropriate write operations.
+
+			forwardSocketError = forwardSocket.stderr.readline()
+			print(Fore.YELLOW + 'Error!\nUnable to forward the unix domain socket to the remote server.\nThis was the error message returned:\n' + forwardSocketError + '\nAnother attempt at forwarding will be made in one minute...' + Style.RESET_ALL , end = '\n\n')
+			time.sleep(60)
 
 
 ##################### MAIN EXECUTION #####################
