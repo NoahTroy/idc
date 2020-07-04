@@ -37,6 +37,8 @@ sendQueue = queue.Queue()
 lastWriteTime = 0
 pendingWrites = []
 pendingWritesFile = False
+
+cloneSocketError = False
 ################## END OF MAIN VARIABLES #################
 
 
@@ -173,7 +175,7 @@ def processWriteData():
 					exit()
 				uniqueID = str(uuid.uuid4()).encode('utf-8')
 
-				data = (uniqueID + b' ' + str(sector).encode('utf-8') + b' ' + data + b' ' + uniqueID)
+				data = (uniqueID + b' ' + str(seekBytes).encode('utf-8') + b' ' + data + b' ' + uniqueID)
 
 				sendQueue.put(data)
 		else:
@@ -217,6 +219,63 @@ def dataFetcher(returnedData = None):
 				return sendQueue.get()
 		else:
 			return pendingWrites.pop(0)
+
+
+def handleWriting(recvSocket):
+	while (True):
+		if (cloneSocketError):
+			cloneSocketError = False
+			return
+		try:
+			connection , address = recvSocket.accept()
+
+			# data = (uniqueID + b' ' + str(seekBytes).encode('utf-8') + b' ' + data + b' ' + uniqueID)
+			dataChunk = b''
+			chunkID = b''
+			seekBytes = -1
+			dataToWrite = b''
+			while (True):
+				if (cloneSocketError):
+					cloneSocketError = False
+					return
+
+				dataChunk += connection.recv(1024)
+
+				if ((dataChunk.find(b' ') == 36) and (not(chunkID))):
+					chunkID = dataChunk[0:36]
+
+				if (chunkID):
+					if (dataChunk.count(chunkID) > 1):
+						dataChunk = dataChunk[37:]
+						nextSeparator = dataChunk.find(b' ')
+						if (nextSeparator == -1):
+							print(Fore.YELLOW + 'Warning!\nAn error occurred attempting to extract the write location\nfrom the master server\'s message. This may cause some data loss...' + Style.RESET_ALL , end = '\n\n')
+							## Reset values here I think... look into this.
+						else:
+							seekBytes = int(dataChunk[:nextSeparator])
+							dataChunk = dataChunk[(nextSeparator + 1):]
+
+							indexOfSecondID = dataChunk.find(chunkID)
+							dataToWrite = dataChunk[:(indexOfSecondID - 1)]
+
+							dataChunk = dataChunk[(indexOfSecondID + 36):]
+
+							try:
+								with open(targetDiskFullPath , 'rb+') as diskToWriteTo:
+									diskToWriteTo.seek(seekBytes)
+									diskToWriteTo.write(dataToWrite)
+							except:
+								print(Fore.RED + 'Error!\nUnable to write data to target disk!\nThis will cause data loss!\nWill move on in 30 seconds...' + Style.RESET_ALL , end = '\n\n')
+								time.sleep(30)
+
+							chunkID = b''
+							seekBytes = -1
+							dataToWrite = b''
+					else:
+						continue
+		except:
+			print(Fore.YELLOW + 'Warning!\nAn error occurred while attempting to receive data\nfrom the forwarded unix domain socket.\nTrying again in 10 seconds...' + Style.RESET_ALL , end = '\n\n')
+			time.sleep(10)
 
 
 def masterSocket():
@@ -275,9 +334,11 @@ def cloneSocket():
 
 			forwardSocket = subprocess.Popen(['ssh' , '-NnT' , '-i' , identityFile , '-p' , str(remoteServerPort) , '-R' , (os.path.join(socketLocation , 'idcMasterSocket.sock') + ':' + os.path.join(socketLocation , 'idcCloneSocket.sock')) , ('root@' + remoteServerIP)] , stderr = subprocess.PIPE)
 
-			# Call a function, here, that will receive data and carry-out the appropriate write operations.
+			handleReceivedDataThread = threading.Thread(target = handleWriting , args = (s))
+			handleReceivedDataThread.start()
 
 			forwardSocketError = forwardSocket.stderr.readline()
+			cloneSocketError = True
 			print(Fore.YELLOW + 'Error!\nUnable to forward the unix domain socket to the remote server.\nThis was the error message returned:\n' + forwardSocketError + '\nAnother attempt at forwarding will be made in one minute...' + Style.RESET_ALL , end = '\n\n')
 			time.sleep(60)
 
