@@ -43,7 +43,7 @@ cloneSocketError = False
 
 
 def startupSequence():
-	global targetDiskMode , targetDisk , fetchDelay , remoteServerIP , remoteServerPort , identityFile
+	global targetDiskMode , targetDisk , fetchDelay , remoteServerIP , remoteServerPort , identityFile , targetDiskFullPath
 
 	# Make sure the program is being run by root:
 	if (not(os.getuid() == 0)):
@@ -185,6 +185,8 @@ def processWriteData():
 
 
 def dataFetcher(returnedData = None):
+	global pendingWrites , pendingWritesFile , pendingWritesFileFullPath
+
 	if (returnedData):
 		pendingWrites.insert(0 , returnedData)
 		if (len(pendingWrites) > 1000):
@@ -224,6 +226,8 @@ def dataFetcher(returnedData = None):
 
 
 def handleWriting(recvSocket):
+	global cloneSocketError
+
 	while (True):
 		if (cloneSocketError):
 			cloneSocketError = False
@@ -231,7 +235,6 @@ def handleWriting(recvSocket):
 		try:
 			connection , address = recvSocket.accept()
 
-			# data = (uniqueID + b' ' + str(seekBytes).encode('utf-8') + b' ' + data + b' ' + uniqueID)
 			dataChunk = b''
 			chunkID = b''
 			seekBytes = -1
@@ -283,8 +286,12 @@ def handleWriting(recvSocket):
 def masterSocket():
 	while (True):
 		try:
-			os.remove(os.path.join(socketLocation , 'idcMasterSocket.sock'))
-			print(Fore.CYAN + 'Successfully removed old unix domain socket.' + Style.RESET_ALL , end = '\n\n')
+			activeConnections = subprocess.Popen(['ss' , '-a'] , stdout = subprocess.PIPE)
+			if (remoteServerIP.encode('utf-8') in activeConnections.stdout.read()):
+				print(Fore.CYAN + 'An already-existent unix domain socket was found.\nIt appears that this socket is actively being forwarded\nfrom the clone server, and therefore was not removed.\nIf this is not the case, please remove the socket (or reboot this server).\nContinuing...' + Style.RESET_ALL , end = '\n\n')
+			else:
+				os.remove(os.path.join(socketLocation , 'idcMasterSocket.sock'))
+				print(Fore.CYAN + 'Successfully removed old, seemingly-unused unix domain socket.' + Style.RESET_ALL , end = '\n\n')
 		except:
 			print(Fore.CYAN + 'No old unix domain socket to remove.' + Style.RESET_ALL , end = '\n\n')
 		with socket.socket(socket.AF_UNIX , socket.SOCK_STREAM) as s:
@@ -296,15 +303,15 @@ def masterSocket():
 				time.sleep(60)
 				continue
 
-		while (True):
-			try:
+			while (True):
 				dataToSend = dataFetcher()
-				s.sendall(dataToSend)
-			except:
-				print(Fore.YELLOW + 'Warning!\nSome data could not be successfully sent to the clone server.\nPlease check the connection, and make sure that no\ndisruptions have occurred. The unsent data has been cached, and\nwill be automatically resent soon.\nIf this message only appears a couple of times, you probably\nhave nothing to worry about.\nTrying again in 20 seconds...' + Style.RESET_ALL , end = '\n\n')
-				dataFetcher(dataToSend)
-				time.sleep(20)
-				continue
+				try:
+					s.sendall(dataToSend)
+				except:
+					print(Fore.YELLOW + 'Warning!\nSome data could not be successfully sent to the clone server.\nPlease check the connection, and make sure that no\ndisruptions have occurred. The unsent data has been cached, and\nwill be automatically resent soon.\nIf this message only appears a couple of times, you probably\nhave nothing to worry about.\nTrying again in 20 seconds...' + Style.RESET_ALL , end = '\n\n')
+					dataFetcher(dataToSend)
+					time.sleep(20)
+					continue
 
 
 def cloneSocket():
@@ -336,7 +343,7 @@ def cloneSocket():
 
 			forwardSocket = subprocess.Popen(['ssh' , '-NnT' , '-i' , identityFile , '-p' , str(remoteServerPort) , '-R' , (os.path.join(socketLocation , 'idcMasterSocket.sock') + ':' + os.path.join(socketLocation , 'idcCloneSocket.sock')) , ('root@' + remoteServerIP)] , stderr = subprocess.PIPE)
 
-			handleReceivedDataThread = threading.Thread(target = handleWriting , args = (s))
+			handleReceivedDataThread = threading.Thread(target = handleWriting , args = (s , ))
 			handleReceivedDataThread.start()
 
 			forwardSocketError = forwardSocket.stderr.readline()
