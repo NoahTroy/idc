@@ -43,6 +43,8 @@ cloneSocketError = False
 
 
 def startupSequence():
+	global targetDiskMode , targetDisk , fetchDelay , remoteServerIP , remoteServerPort , identityFile
+
 	# Make sure the program is being run by root:
 	if (not(os.getuid() == 0)):
 		print(Fore.RED + 'Error!\nThis program must be run as the root user.\nExiting...' + Style.RESET_ALL , end = '\n\n')
